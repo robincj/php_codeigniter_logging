@@ -169,7 +169,7 @@ function log_endf($results = NULL, $msg = '', $lvl = 'debug') {
 			if (is_object ( $results ))
 				$results = print_r ( get_object_vars ( $results ), 1 );
 			elseif (is_array ( $results ))
-				$resultmsg = (dimension_count ( $results ) <= 1 && is_assoc ( $results )) ? "'" . implode ( "', '", $results ) . "'" : print_r ( $results, 1 );
+				$resultmsg = (! is_multidim ( $results ) && ! is_assoc ( $results )) ? "'" . implode ( "', '", $results ) . "'" : print_r ( $results, 1 );
 			else
 				$resultmsg = $results;
 		}
@@ -334,16 +334,25 @@ function is_log_level_active($lvl) {
 	return (log_level_number ( $lvl ) <= $GLOBALS ['log_threshold']);
 }
 /**
+ * For quick crude debugging - dump (print_r()) the content of the arguments to the screen, wrapped in a pre tag.
+ *
+ * @param array $a
+ */
+function dump(...$a) {
+	echo "<pre>";
+	echo myclassfname ( 2 ) . " called by " . myclassfname ( 3 ) . "()" . PHP_EOL;
+	foreach ( $a as $arg ) {
+		print_r ( $arg );
+		echo PHP_EOL . "------" . PHP_EOL;
+	}
+	echo "</pre>";
+}
+/**
  * For quick crude debugging - dump (print_r()) the content of the arguments to the screen, wrapped in a pre tag, and exit.
  *
  * @param array $a
  */
-function dumpx($a) {
-	echo "<pre>";
-	foreach ( func_get_args () as $arg ) {
-		print_r ( $arg );
-		echo "\n------\n";
-	}
-	echo "</pre>";
+function dumpx(...$a) {
+	dump ( ...$a );
 	exit ();
 }
