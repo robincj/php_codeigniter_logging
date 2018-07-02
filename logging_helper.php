@@ -5,17 +5,7 @@
  *
  * Add as a helper to the CodeIgniter application/config/autoload.php e.g.
  * $autoload['helper'] = array('url', 'form', 'cookie', 'array', 'string', 'logging');
- */
-/*
- * Note:
- * array debug_backtrace ([ int $options = DEBUG_BACKTRACE_PROVIDE_OBJECT [, int $limit = 0 ]] )
  *
- * debug_backtrace() - show all options
- * debug_backtrace(0) - exlude ["object"]
- * debug_backtrace(1) - same as debug_backtrace()
- * debug_backtrace(2) - exlude ["object"] AND ["args"]
- */
-/**
  * Writes error message to log.
  * If arg 2 is true then current portal user id is prepended to message. Default is true.
  * Message is automatically prepended with caller class::function name
@@ -26,6 +16,20 @@
  */
 function logerror($msg, $loguser = true) {
 	return log_message_f ( 'error', $msg, 1, $loguser );
+}
+/**
+ * Builds an error message from the Throwable (Error, Exception, ErrorException etc.) and writes the error message to the log.
+ * Additional message can be supplied as arg 2 and this will be prepended to the exceptin message.
+ * If arg 3 is true then current portal user id is prepended to message. Default is true.
+ * Message is automatically prepended with caller class::function name
+ *
+ * @param string $msg
+ * @param bool $loguser
+ * @return string
+ */
+function log_exception(Throwable $exception, $msg = '', $loguser = true) {
+	$msg = $msg . " - " . $exception->__toString ();
+	return logerror ( $msg, $loguser );
 }
 /**
  * Writes debug message to log.
@@ -94,14 +98,19 @@ function log_message_f($lvl = 'debug', $msg = '', $back = 0, $loguser = false) {
 	}
 }
 /**
+ * Writes a print_r() output of the given array to the log.
+ * If an object is provided rather than an array then it will just log the object's properties (get_object_vars()), not methods.
  *
  * @param array $array
  * @param string $msg
  * @param string $lvl
  */
 function log_print_r($array, $msg = '', $lvl = 'debug') {
-	if (is_log_level_active ( $lvl ))
+	if (is_log_level_active ( $lvl )) {
+		if (is_object ( $array ))
+			$array = get_object_vars ( $array );
 		log_message_f ( $lvl, "$msg - print_r:  " . print_r ( $array, 1 ), 1 );
+	}
 }
 /**
  *
@@ -126,10 +135,11 @@ function log_var($varname, $msg = '', $lvl = 'debug') {
 		return false;
 		if ($msg)
 			log_message_f ( $lvl, $msg, 1 );
-		log_message_f ( $lvl, "Variable '$varname' has value: " . ((is_array ( $$varname ) || is_object ( $$varname )) ? print_r ( $$varname, 1 ) : $$varname), 1 );
+		log_message_f ( $lvl, "Variable '$varname' has value: " . ((is_array ( $$varname ) || is_object ( $$varname )) ? print_r ( get_object_vars ( $$varname ), 1 ) : $$varname), 1 );
 	}
 }
 /**
+ * Log the start of a function.
  * Put log_startf() at the start of a function/method to record a START line in the logs.
  * If arg 1 is true then the function args will be dumped using print_r().
  * Arg 2 can be a message to record in the log immediately after the START info.
@@ -141,17 +151,20 @@ function log_var($varname, $msg = '', $lvl = 'debug') {
  */
 function log_startf($dump_logargs = false, $msg = '', $lvl = 'debug') {
 	if (is_log_level_active ( $lvl )) {
-		$args = '';
+		$args = $caller = '';
+		$backtrace = debug_backtrace ( 0, 2 ) [1];
 		if ($dump_logargs) {
-			$args = debug_backtrace ( 0, 2 ) [1] ['args'];
+			$caller = "  : " . $backtrace ['file'] . " (" . $backtrace ['line'] . ") ";
+			$args = $backtrace ['args'];
 			$args = is_multidim ( $args ) ? print_r ( $args, 1 ) : "'" . flatten_to_string ( "', '", $args ) . "'";
 		}
-		log_message ( $lvl, log_indent () . "START Function: " . myclassfname ( 1 ) . "($args)" );
+		log_message ( $lvl, log_indent () . "START: " . myclassfname ( $backtrace ) . "($args)$caller" );
 		if ($msg)
 			log_message_f ( $lvl, $msg, 1 );
 	}
 }
 /**
+ * Log the end of a function.
  * Put log_endf() at the end of a function/method to record an END line in the logs.
  * If arg 1 is true then the function results will be dumped using print_r().
  * Arg 2 can be a message to record in the log immediately before the END info.
@@ -173,20 +186,24 @@ function log_endf($results = NULL, $msg = '', $lvl = 'debug') {
 			else
 				$resultmsg = $results;
 		}
-		log_message ( $lvl, log_indent () . "END Function: " . myclassfname ( 1 ) . "() $msg $resultmsg" );
+		log_message ( $lvl, log_indent () . "END: " . myclassfname ( 1 ) . "() $msg $resultmsg" );
 	}
 	return $ret;
 }
 /**
  * Returns the function/method name of the calling function.
- * Arg sets the number of function call levels to backtrace to to get the name from.
+ * Arg sets the number of function call levels to backtrace to to get the name from or the backtrace sub-array you want to use.
  *
- * @param number $back
+ * @param number|array $back
  * @return string
  */
 function myfname($back = 0) {
-	++ $back;
-	return debug_backtrace ( 2, $back + 1 ) [$back] ['function'];
+	$trace = $back;
+	if (! is_array ( $back )) {
+		++ $back;
+		$trace = debug_backtrace ( 2, $back + 1 ) [$back];
+	}
+	return $trace ['function'];
 }
 /**
  * Returns the class name of the calling function.
@@ -196,20 +213,32 @@ function myfname($back = 0) {
  * @return string
  */
 function myclassname($back = 0) {
-	++ $back;
-	$trace = debug_backtrace ( 2, $back + 1 ) [$back];
+	$trace = $back;
+	if (! is_array ( $back )) {
+		++ $back;
+		$trace = debug_backtrace ( 2, $back + 1 ) [$back];
+	}
 	return array_key_exists ( 'class', $trace ) ? $trace ['class'] : '';
 }
 /**
  * Returns the class name and function name of the calling function.
  * Returned string is formatted with a double colon separating the two values, like "classname::functionname"
- * Arg sets the number of function call levels to backtrace to to get the names from.
+ * Arg sets the number of function call levels to backtrace to to get the names from, or the backtrace sub-array you want to use (avoids multiple calls to debug_backtrace()).
  *
- * @param number $back
+ * @param number|array $back
  * @return string
  */
 function myclassfname($back = 0) {
-	return myclassname ( ++ $back ) . "::" . myfname ( $back );
+	// return myclassname ( ++ $back ) . "::" . myfname ( $back );
+	$trace = $back;
+	if (! is_array ( $back )) {
+		++ $back;
+		$trace = debug_backtrace ( 2, $back + 1 ) [$back];
+	}
+	$class = array_key_exists ( 'class', $trace ) ? $trace ['class'] : '';
+	$type = array_key_exists ( 'type', $trace ) ? $trace ['type'] : ' ';
+	$func = $trace ['function'];
+	return $class . $type . $func;
 }
 /**
  * Logs the calling class::function name and it's caller class::function name.
@@ -249,16 +278,18 @@ function log_backtracef($msg = '', $lvl = 'debug') {
 		$lvl = $msg;
 		$msg = '';
 	}
+	// Line is the line number in the file that the function was called FROM
 	if (is_log_level_active ( $lvl )) {
 		$trace = debug_backtrace ( 2 );
 		array_shift ( $trace );
 		$funcs = array ();
 		foreach ( $trace as $x ) {
-			$class = array_key_exists ( 'class', $x ) ? $x ['class'] : '[unknown class]';
+			$class = element ( 'class', $x, '' );
 			$function = array_key_exists ( 'function', $x ) ? $x ['function'] : '[unknown function]';
-			$funcs [] = $class . "::" . $function;
+			$type = element ( 'type', $x, ' ' );
+			$funcs [] = $class . $type . $function . " (" . $x ['file'] . " - " . $x ['line'] . ")";
 		}
-		log_message_f ( $lvl, "Backtrace initiated from function " . implode ( ", " . PHP_EOL, $funcs ), 1 ) . " $msg";
+		log_message_f ( $lvl, "Backtrace: " . PHP_EOL . "   " . implode ( "," . PHP_EOL . "   ", $funcs ), 1 ) . " $msg";
 		return $funcs;
 	}
 }
